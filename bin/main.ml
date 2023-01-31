@@ -1,86 +1,146 @@
 (*
-find bin/ lib/ -name "*.ml" | entr -rc dune exec ./bin/main.exe
+
+  Quickly test the endpoints by copy/pasting the following:
+
+  for PATH_ in dog cat "dog/1" "cat/1";do curl -w " => %{http_code}\\n" localhost:4000/$PATH_;done
+  for VERB in GET POST PUT DELETE;do curl -w " => %{http_code}\\n" -X $VERB localhost:4000/dog/1;done
 *)
 
 open Opium
 
-module Person = struct
-  type t = { name : string; age : int }
+let not_found _req = Response.of_plain_text ~status:`Not_found "" |> Lwt.return
 
-  let yojson_of_t t = `Assoc [ ("name", `String t.name); ("age", `Int t.age) ]
+module MethodMap = Map.Make (struct
+  type t = Method.t
 
-  let t_of_yojson yojson =
-    match yojson with
-    | `Assoc [ ("name", `String name); ("age", `Int age) ] -> { name; age }
-    | _ -> failwith "Person: invalid json"
-  ;;
-end
+  let compare a b = compare a b
+end)
 
-(*
-  http localhost:3000/person/john_doe/42
-*)
-let print_person_handler req =
-  let name = Router.param req "name" in
-  let age = Router.param req "age" |> int_of_string in
-  let person = { Person.name; age } |> Person.yojson_of_t in
-  Lwt.return (Response.of_json person)
+let routed_handler
+    (routes : (Request.t -> Response.t Lwt.t) Routes.router MethodMap.t)
+    (req : Request.t) =
+  match MethodMap.find_opt req.Request.meth routes with
+  | None -> Lwt.return (Response.make ~status:`Method_not_allowed ())
+  | Some router -> (
+      match Routes.match' router ~target:req.Request.target with
+      | Routes.NoMatch -> not_found req
+      | FullMatch r -> r req
+      | MatchWithTrailingSlash r ->
+          (* Tcats branch indicates that incoming request's path finishes with a
+             trailing slash. If you app needs to distinguish trailing slashes
+             (/a/b vs /a/b/), tcats is where you'd write something to handle the
+             use-case *)
+          r req)
 ;;
 
-(*
-  http PATCH localhost:3000/person name=john_doe age:=42
-*)
-let update_person_handler req =
-  let open Lwt.Syntax in
-  let+ json = Request.to_json_exn req in
-  let person = Person.t_of_yojson json in
-  Logs.info (fun m -> m "Received person: %s" person.Person.name)
-  ; Response.of_json (`Assoc [ ("message", `String "Person saved") ])
+let get_many_dogs () : ('a -> Response.t Lwt.t) Routes.route =
+  Routes.route
+    Routes.(s "dog" /? nil)
+    (fun _ -> Lwt.return @@ Response.of_plain_text "GET many dogs")
 ;;
 
-(*
-  http localhost:3000/hello/world
-*)
-let print_param_handler req =
-  Printf.sprintf "Hello, %s\n" (Router.param req "name")
-  |> Response.of_plain_text
-  |> Lwt.return
+let get_one_dog () : (Request.t -> Response.t Lwt.t) Routes.route =
+  Routes.route
+    Routes.(s "dog" / int /? nil)
+    (fun id _req ->
+      Lwt.return
+      @@ Response.of_plain_text
+      @@ Printf.sprintf "GET one dog (ID=%d)" id)
 ;;
 
-(*
-  echo -e "Hello line 1\nline 2\nline 3" | http --stream POST localhost:3000/hello/stream | while read line;do echo "$line";done
-*)
-let streaming_handler req =
-  let length = Body.length req.Request.body in
-  let content = Body.to_stream req.Request.body in
-  let body = Lwt_stream.map String.uppercase_ascii content in
-  let resp = Response.make ~body:(Body.of_stream ?length body) () in
-  Lwt.return resp
+let post_one_dog () : (Request.t -> Response.t Lwt.t) Routes.route =
+  Routes.route
+    Routes.(s "dog" / int /? nil)
+    (fun id _req ->
+      Lwt.return
+      @@ Response.of_plain_text
+      @@ Printf.sprintf "POST one dog (ID=%d)" id)
 ;;
 
-let () =
-  App.empty
-  |> App.post "/hello/stream" streaming_handler
-  |> App.get "/person/:name/:age" print_person_handler
-  |> App.patch "/person" update_person_handler
-  |> App.get "/hello/:name" print_param_handler
-  |> App.run_command
+let put_one_dog () : (Request.t -> Response.t Lwt.t) Routes.route =
+  Routes.route
+    Routes.(s "dog" / int /? nil)
+    (fun id _req ->
+      Lwt.return
+      @@ Response.of_plain_text
+      @@ Printf.sprintf "PUT one dog (ID=%d)" id)
 ;;
 
-(*
-let () =
-  App.empty
-  |> (
-    App.get "/" @@ fun _req ->
-    Lwt.return @@  Response.of_plain_text "Hello, World"
-  )
-  |> App.run_command
+let delete_one_dog () : 'a Routes.route =
+  Routes.route
+    Routes.(s "dog" / int /? nil)
+    (fun id _req ->
+      Lwt.return
+      @@ Response.of_plain_text
+      @@ Printf.sprintf "DELETE one dog (ID=%d)" id)
 ;;
-   *)
 
-(* let () =
-   App.run_command
-   @@ App.get "/" begin fun req ->
-    Lwt.return @@ Response.of_plain_text "Hello, World!"
-   end
-   @@ App.empty
-   ;; *)
+let delete_many_dog () : 'a Routes.route =
+  Routes.route
+    Routes.(s "dog" /? nil)
+    (fun _ -> Lwt.return @@ Response.of_plain_text "DELETE many dogs")
+;;
+
+let get_many_cats () : 'a Routes.route =
+  Routes.route
+    Routes.(s "cat" /? nil)
+    (fun _ -> Lwt.return @@ Response.of_plain_text "GET many cats")
+;;
+
+let get_one_cat () : 'a Routes.route =
+  Routes.route
+    Routes.(s "cat" / int /? nil)
+    (fun id _req ->
+      Lwt.return
+      @@ Response.of_plain_text
+      @@ Printf.sprintf "GET one cat (ID=%d)" id)
+;;
+
+let dog_routes : (Method.t * ('a Routes.route) list) list =
+  [ (`GET,    [ get_many_dogs ()
+              ; get_one_dog ()
+              ]
+    )
+  ; (`POST,   [ post_one_dog () ])
+  ; (`PUT,    [ put_one_dog (); put_one_dog () ])
+  ; (`DELETE, [ delete_many_dog (); delete_one_dog () ])
+  ] [@@ocamlformat "disable"]
+
+let cat_routes : (Method.t * ('a Routes.route) list) list =
+  [ (`GET,    [ get_many_cats ()
+              ; get_one_cat ()
+              ]
+    )
+  ; (`POST,   [])
+  ; (`PUT,    [])
+  ; (`DELETE, [])
+  ] [@@ocamlformat "disable"]
+
+let merge_routes (lst : (Method.t * 'a Routes.route list) list list) :
+    (Method.t * 'a Routes.route list) list =
+  List.fold_left
+    (fun acc routes ->
+      List.fold_left
+        (fun acc (meth, routes) ->
+          let curr_routes =
+            try List.assoc meth acc with
+            | Not_found -> []
+          in
+          (meth, routes @ curr_routes) :: List.remove_assoc meth acc)
+        acc routes)
+    [] lst
+;;
+
+let build_router =
+  List.fold_left
+    (fun meth_map (meth, handlers) ->
+      MethodMap.add meth (Routes.one_of handlers) meth_map)
+    MethodMap.empty
+;;
+
+let all_resource_routes : (Method.t * 'a Routes.route list) list =
+  merge_routes [ dog_routes; cat_routes ]
+;;
+
+let handle_routes req = routed_handler (build_router @@ all_resource_routes) req
+let () = App.empty |> App.all "**" handle_routes |> App.run_command

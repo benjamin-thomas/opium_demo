@@ -1,2 +1,3 @@
 (library
- (name opium_demo))
+ (name opium_demo)
+ (libraries opium routes base))
