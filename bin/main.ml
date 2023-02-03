@@ -2,11 +2,26 @@
 
   Quickly test the endpoints by copy/pasting the following:
 
-  for PATH_ in dog cat "dog/1" "cat/1";do curl -w " => %{http_code}\\n" localhost:4000/$PATH_;done
-  for VERB in GET POST PUT DELETE;do curl -w " => %{http_code}\\n" -X $VERB localhost:4000/dog/1;done
+for PATH_ in dog cat "dog/1" "cat/1";do curl -w " => %{http_code}\\n" localhost:4000/$PATH_;done && \
+echo "---" && \
+for VERB in GET POST PUT DELETE;do curl -w " => %{http_code}\\n" -X $VERB localhost:4000/dog/1;done && \
+http localhost:4000/person/John/99 && \
+http POST localhost:4000/person name="Jane Doe" age:=98
 *)
 
 open Opium
+
+module Person = struct
+  type t = { name : string; age : int }
+
+  let yojson_of_t t = `Assoc [ ("name", `String t.name); ("age", `Int t.age) ]
+
+  let t_of_yojson yojson =
+    match yojson with
+    | `Assoc [ ("name", `String name); ("age", `Int age) ] -> { name; age }
+    | _ -> failwith "invalid person json"
+  ;;
+end
 
 let not_found _req = Response.of_plain_text ~status:`Not_found "" |> Lwt.return
 
@@ -114,6 +129,26 @@ let cat_routes =
   ; (`DELETE, [])
   ] [@@ocamlformat "disable"]
 
+let search_person () =
+  Routes.(route (s "person" / str / int /? nil)) @@ fun name age _req ->
+  let person = Person.yojson_of_t { name; age } in
+  Lwt.return @@ Response.of_json @@ person
+;;
+
+let post_person () : (Rock.Request.t -> Rock.Response.t Lwt.t) Routes.route =
+  Routes.(route (s "person" /? nil)) @@ fun req ->
+  let open Lwt.Syntax in
+  let+ json = Request.to_json_exn req in
+  let person = Person.t_of_yojson json in
+  Logs.info (fun m -> m "Received person: %s" person.name)
+  ; Response.of_json (`Assoc [ ("message", `String "Person saved") ])
+;;
+
+let person_routes =
+  [ (`GET,  [ search_person () ])
+  ; (`POST, [ post_person () ])
+  ] [@@ocamlformat "disable"]
+
 let merge_routes =
   List.fold_left
     (fun acc routes ->
@@ -135,10 +170,27 @@ let build_router =
     MethodMap.empty
 ;;
 
-let all_resources_routes = merge_routes [ dog_routes; cat_routes ]
+let all_resources_routes =
+  merge_routes [ dog_routes; cat_routes; person_routes ]
+;;
 
 let handle_routes req =
   routed_handler (build_router @@ all_resources_routes) req
 ;;
 
-let () = App.empty |> App.all "**" handle_routes |> App.run_command
+let log_level = Some Logs.Debug
+
+let set_logger () =
+  Logs.set_reporter (Logs_fmt.reporter ())
+  ; Logs.set_level log_level
+;;
+
+(*
+  TODO: maybe see this tutorial:
+    https://shonfeder.gitlab.io/ocaml_webapp
+*)
+let () =
+  set_logger ()
+  ; print_newline ()
+  ; App.empty |> App.all "**" handle_routes |> App.run_command
+;;
