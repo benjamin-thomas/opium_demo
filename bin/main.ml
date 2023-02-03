@@ -16,9 +16,7 @@ module MethodMap = Map.Make (struct
   let compare a b = compare a b
 end)
 
-let routed_handler
-    (routes : (Request.t -> Response.t Lwt.t) Routes.router MethodMap.t)
-    (req : Request.t) =
+let routed_handler routes req =
   match MethodMap.find_opt req.Request.meth routes with
   | None -> Lwt.return (Response.make ~status:`Method_not_allowed ())
   | Some router -> (
@@ -26,20 +24,20 @@ let routed_handler
       | Routes.NoMatch -> not_found req
       | FullMatch r -> r req
       | MatchWithTrailingSlash r ->
-          (* Tcats branch indicates that incoming request's path finishes with a
+          (* This branch indicates that incoming request's path finishes with a
              trailing slash. If you app needs to distinguish trailing slashes
-             (/a/b vs /a/b/), tcats is where you'd write something to handle the
+             (/a/b vs /a/b/), this is where you'd write something to handle the
              use-case *)
           r req)
 ;;
 
-let get_many_dogs () : ('a -> Response.t Lwt.t) Routes.route =
+let get_many_dogs () =
   Routes.route
     Routes.(s "dog" /? nil)
     (fun _ -> Lwt.return @@ Response.of_plain_text "GET many dogs")
 ;;
 
-let get_one_dog () : (Request.t -> Response.t Lwt.t) Routes.route =
+let get_one_dog () =
   Routes.route
     Routes.(s "dog" / int /? nil)
     (fun id _req ->
@@ -48,7 +46,7 @@ let get_one_dog () : (Request.t -> Response.t Lwt.t) Routes.route =
       @@ Printf.sprintf "GET one dog (ID=%d)" id)
 ;;
 
-let post_one_dog () : (Request.t -> Response.t Lwt.t) Routes.route =
+let post_one_dog () =
   Routes.route
     Routes.(s "dog" / int /? nil)
     (fun id _req ->
@@ -57,7 +55,7 @@ let post_one_dog () : (Request.t -> Response.t Lwt.t) Routes.route =
       @@ Printf.sprintf "POST one dog (ID=%d)" id)
 ;;
 
-let put_one_dog () : (Request.t -> Response.t Lwt.t) Routes.route =
+let put_one_dog () =
   Routes.route
     Routes.(s "dog" / int /? nil)
     (fun id _req ->
@@ -66,7 +64,7 @@ let put_one_dog () : (Request.t -> Response.t Lwt.t) Routes.route =
       @@ Printf.sprintf "PUT one dog (ID=%d)" id)
 ;;
 
-let delete_one_dog () : 'a Routes.route =
+let delete_one_dog () =
   Routes.route
     Routes.(s "dog" / int /? nil)
     (fun id _req ->
@@ -75,19 +73,19 @@ let delete_one_dog () : 'a Routes.route =
       @@ Printf.sprintf "DELETE one dog (ID=%d)" id)
 ;;
 
-let delete_many_dog () : 'a Routes.route =
+let delete_many_dog () =
   Routes.route
     Routes.(s "dog" /? nil)
     (fun _ -> Lwt.return @@ Response.of_plain_text "DELETE many dogs")
 ;;
 
-let get_many_cats () : 'a Routes.route =
+let get_many_cats () =
   Routes.route
     Routes.(s "cat" /? nil)
     (fun _ -> Lwt.return @@ Response.of_plain_text "GET many cats")
 ;;
 
-let get_one_cat () : 'a Routes.route =
+let get_one_cat () =
   Routes.route
     Routes.(s "cat" / int /? nil)
     (fun id _req ->
@@ -96,7 +94,7 @@ let get_one_cat () : 'a Routes.route =
       @@ Printf.sprintf "GET one cat (ID=%d)" id)
 ;;
 
-let dog_routes : (Method.t * ('a Routes.route) list) list =
+let dog_routes =
   [ (`GET,    [ get_many_dogs ()
               ; get_one_dog ()
               ]
@@ -106,7 +104,7 @@ let dog_routes : (Method.t * ('a Routes.route) list) list =
   ; (`DELETE, [ delete_many_dog (); delete_one_dog () ])
   ] [@@ocamlformat "disable"]
 
-let cat_routes : (Method.t * ('a Routes.route) list) list =
+let cat_routes =
   [ (`GET,    [ get_many_cats ()
               ; get_one_cat ()
               ]
@@ -116,8 +114,7 @@ let cat_routes : (Method.t * ('a Routes.route) list) list =
   ; (`DELETE, [])
   ] [@@ocamlformat "disable"]
 
-let merge_routes (lst : (Method.t * 'a Routes.route list) list list) :
-    (Method.t * 'a Routes.route list) list =
+let merge_routes =
   List.fold_left
     (fun acc routes ->
       List.fold_left
@@ -128,7 +125,7 @@ let merge_routes (lst : (Method.t * 'a Routes.route list) list list) :
           in
           (meth, routes @ curr_routes) :: List.remove_assoc meth acc)
         acc routes)
-    [] lst
+    []
 ;;
 
 let build_router =
@@ -138,9 +135,10 @@ let build_router =
     MethodMap.empty
 ;;
 
-let all_resource_routes : (Method.t * 'a Routes.route list) list =
-  merge_routes [ dog_routes; cat_routes ]
+let all_resources_routes = merge_routes [ dog_routes; cat_routes ]
+
+let handle_routes req =
+  routed_handler (build_router @@ all_resources_routes) req
 ;;
 
-let handle_routes req = routed_handler (build_router @@ all_resource_routes) req
 let () = App.empty |> App.all "**" handle_routes |> App.run_command
