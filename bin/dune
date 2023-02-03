@@ -1,3 +1,5 @@
 (executable
  (name main)
- (libraries opium_demo opium routes))
+ (libraries opium_demo opium routes caqti caqti-lwt caqti-driver-sqlite3)
+ (preprocess
+  (pps lwt_ppx)))

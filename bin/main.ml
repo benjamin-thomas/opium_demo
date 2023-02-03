@@ -23,6 +23,47 @@ module Person = struct
   ;;
 end
 
+module Q = struct
+  open Caqti_request.Infix
+  open Caqti_type.Std
+
+  let person =
+    let encode { Person.name; age } = Ok (name, age) in
+    let decode (name, age) = Ok { Person.name; age } in
+    let rep = tup2 string int in
+    custom ~encode ~decode rep
+  ;;
+
+  let select_person =
+    (unit ->? person)
+    @@ "SELECT fname || ' ' || lname AS name, age FROM person WHERE id < 99 \
+        LIMIT 1"
+  ;;
+end
+
+let select_person (module Db : Caqti_lwt.CONNECTION) =
+  Db.find_opt Q.select_person ()
+;;
+
+let pool =
+  let cwd = Unix.getcwd () in
+  Caqti_lwt.connect_pool ~max_size:3
+    (Uri.of_string @@ Printf.sprintf "sqlite3://%s/db.sqlite" cwd)
+  |> function
+  | Ok pool -> pool
+  | Error err -> failwith (Caqti_error.show err)
+;;
+
+type error = Database_error of string
+
+(* Helper method to map Caqti errors to our own error type.
+   val or_error : ('a, [> Caqti_error.t ]) result Lwt.t -> ('a, error) result Lwt.t *)
+let or_error m =
+  match%lwt m with
+  | Ok a -> Ok a |> Lwt.return
+  | Error e -> Error (Database_error (Caqti_error.show e)) |> Lwt.return
+;;
+
 let not_found _req = Response.of_plain_text ~status:`Not_found "" |> Lwt.return
 
 module MethodMap = Map.Make (struct
@@ -131,8 +172,20 @@ let cat_routes =
 
 let search_person () =
   Routes.(route (s "person" / str / int /? nil)) @@ fun name age _req ->
-  let person = Person.yojson_of_t { name; age } in
-  Lwt.return @@ Response.of_json @@ person
+  let () = Logs.info (fun m -> m "Searching person: %s" name) in
+  let _p1 = Person.yojson_of_t { name; age } in
+  let%lwt (res : (Person.t option, error) result) =
+    Caqti_lwt.Pool.use select_person pool |> or_error
+  in
+  match res with
+  | Error (Database_error err) ->
+      Lwt.return
+      @@ Response.of_plain_text
+      @@ Printf.sprintf "Oh noes, got an error! (%s)" err
+  | Ok None -> Lwt.return @@ Response.of_plain_text "Oops, person not found!"
+  | Ok (Some p) ->
+      let p2 = Person.yojson_of_t p in
+      Lwt.return @@ Response.of_json @@ p2
 ;;
 
 let post_person () : (Rock.Request.t -> Rock.Response.t Lwt.t) Routes.route =
@@ -189,6 +242,7 @@ let set_logger () =
   TODO: maybe see this tutorial:
     https://shonfeder.gitlab.io/ocaml_webapp
 *)
+
 let () =
   set_logger ()
   ; print_newline ()

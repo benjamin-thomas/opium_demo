@@ -6,6 +6,7 @@ CREATE TABLE person
   );
 
 INSERT INTO person (fname, lname, age)
-VALUES ('John', 'Doe', 99)
+VALUES ('John', 'Snow', 999)
+     , ('John', 'Doe', 99)
      , ('Jane', 'Doe', 98)
      ;
