@@ -1,0 +1,7 @@
+#!/bin/bash
+
+set -e
+
+[ -f ./db.sqlite ] && rm ./db.sqlite
+sqlite3 ./db.sqlite <./manage/sql/init_sqlite.sql
+echo "SQlite database should now be ready!"

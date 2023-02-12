@@ -1,0 +1,15 @@
+# foreman start -f Procfile.dev ; reset
+#
+# Database setup:
+#
+#   make db-init && make db-create && make db-migrate
+#
+#
+# When stopping/starting development
+#
+#   make db-stop
+#   make db-start
+#
+web_reload: find bin/ lib/ -name "*.ml" -or -name "*.mli" -or -name "dune" | entr -r dune exec ./bin/main.exe -- --port=4000
+pg_refresh: echo ./manage/sql/init_pg.sql | entr make db-refresh
+sqlite_refresh: echo ./manage/sql/init_sqlite.sql | entr ./manage/dev/init_sqlite

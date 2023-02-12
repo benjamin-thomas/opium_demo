@@ -5,7 +5,8 @@
 for PATH_ in dog cat "dog/1" "cat/1";do curl -w " => %{http_code}\\n" localhost:4000/$PATH_;done && \
 echo "---" && \
 for VERB in GET POST PUT DELETE;do curl -w " => %{http_code}\\n" -X $VERB localhost:4000/dog/1;done && \
-http localhost:4000/person/John/99 && \
+http localhost:4000/person/John/99/pg && \
+http localhost:4000/person/John/99/sqlite && \
 http POST localhost:4000/person name="Jane Doe" age:=98
 *)
 
@@ -45,13 +46,17 @@ let select_person (module Db : Caqti_lwt.CONNECTION) =
   Db.find_opt Q.select_person ()
 ;;
 
-let pool =
-  let cwd = Unix.getcwd () in
-  Caqti_lwt.connect_pool ~max_size:3
-    (Uri.of_string @@ Printf.sprintf "sqlite3://%s/db.sqlite" cwd)
-  |> function
+let create_pool conn_str =
+  Caqti_lwt.connect_pool ~max_size:3 (Uri.of_string conn_str) |> function
   | Ok pool -> pool
   | Error err -> failwith (Caqti_error.show err)
+;;
+
+let pg_pool = create_pool "postgresql://localhost:5432/opium_demo"
+
+let sqlite_pool =
+  let conn_str = Printf.sprintf "sqlite3://%s/db.sqlite" (Unix.getcwd ()) in
+  create_pool conn_str
 ;;
 
 type error = Database_error of string
@@ -170,10 +175,22 @@ let cat_routes =
   ; (`DELETE, [])
   ] [@@ocamlformat "disable"]
 
+(*
+  http localhost:4000/person/John/99/pg <-- query postgresql database
+  http localhost:4000/person/John/99/sq <-- query sqlite database
+  http localhost:4000/person/John/99/whatever <-- query sqlite database (FIXME: clean this up)
+*)
 let search_person () =
-  Routes.(route (s "person" / str / int /? nil)) @@ fun name age _req ->
+  Routes.(route (s "person" / str / int / str /? nil))
+  @@ fun name age db _req ->
   let () = Logs.info (fun m -> m "Searching person: %s" name) in
   let _p1 = Person.yojson_of_t { name; age } in
+  let pool =
+    if db = "pg" then
+      pg_pool
+    else
+      sqlite_pool
+  in
   let%lwt (res : (Person.t option, error) result) =
     Caqti_lwt.Pool.use select_person pool |> or_error
   in

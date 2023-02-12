@@ -1,6 +1,0 @@
-#!/bin/bash
-
-set -e
-
-[ -f ./db.sqlite ] && rm ./db.sqlite
-sqlite3 ./db.sqlite <./manage/sql/init.sql

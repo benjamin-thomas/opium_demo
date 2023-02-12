@@ -1,13 +1,5 @@
-#!/bin/bash
+#!/bin/bash -x
 
-./manage/dev/init_db
+trap reset EXIT
 
-WATCHED_EXT='*.sql *.ml'
-
-if [ "$RESET" = "0" ]; then
-    echo "Won't reset the DB on app restarts"
-    exec git ls-files $WATCHED_EXT | entr -rc bash -c 'dune exec ./bin/main.exe -- --port=4000'
-else
-    echo "Will reset the DB on app restarts"
-    exec git ls-files $WATCHED_EXT | entr -rc bash -c './manage/dev/init_db && dune exec ./bin/main.exe -- --port=4000'
-fi
+foreman start -f Procfile.dev

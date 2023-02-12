@@ -6,7 +6,7 @@ CREATE TABLE person
   );
 
 INSERT INTO person (fname, lname, age)
-VALUES ('John', 'Snow', 999)
-     , ('John', 'Doe', 99)
-     , ('Jane', 'Doe', 98)
+VALUES ('John (sqlite)', 'Snow (sqlite)', 999)
+     , ('John (sqlite)', 'Doe (sqlite)', 99)
+     , ('Jane (sqlite)', 'Doe (sqlite)', 98)
      ;
