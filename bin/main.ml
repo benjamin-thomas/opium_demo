@@ -36,9 +36,11 @@ module Q = struct
   ;;
 
   let select_person =
-    (unit ->? person)
-    @@ "SELECT fname || ' ' || lname AS name, age FROM person WHERE id < 99 \
-        LIMIT 1"
+    let sql =
+      "SELECT fname || ' ' || lname AS name, age FROM person WHERE id < 99 \
+       LIMIT 1"
+    in
+    (unit ->? person) @@ sql
   ;;
 end
 
